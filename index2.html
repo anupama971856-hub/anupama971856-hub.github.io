@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report Hotspot</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+    
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            background: url('bg2.png') no-repeat center center fixed;
+            background-size: cover;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .main-wrapper {
+            width: 100%;
+            max-width: 650px;
+            background: rgba(255, 255, 255, 0.82); 
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+            margin: auto;
+        }
+
+        #map-container {
+            width: 100%;
+            height: 350px; /* Increased height slightly for better search viewing */
+            border: 3px solid #2563eb;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 25px;
+            background: #fff;
+        }
+        #map { height: 100%; width: 100%; }
+
+        /* Styling the Search Bar to look cleaner */
+        .leaflet-control-geocoder {
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        h2 { text-align: center; color: #1e293b; margin-top: 0; }
+
+        .question-label { 
+            display: block; 
+            font-weight: bold; 
+            font-size: 1.1rem;
+            margin-bottom: 12px; 
+            color: #1e293b; 
+        }
+
+        .option-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr; 
+            gap: 12px;
+            margin-bottom: 25px;
+        }
+
+        .choice-box {
+            background: white;
+            border: 2px solid #cbd5e1;
+            padding: 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            text-align: center;
+            font-weight: normal; 
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .choice-box:hover { border-color: #3b82f6; }
+
+        .choice-box.active {
+            border-color: #2563eb;
+            background: #eff6ff;
+            font-weight: 600;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 15px;
+            border-radius: 10px;
+            border: 2px solid #cbd5e1;
+            box-sizing: border-box;
+            font-size: 1rem;
+            min-height: 80px;
+            margin-bottom: 20px;
+        }
+
+        #submit-btn {
+            width: 100%;
+            padding: 18px;
+            background: #0f172a;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="main-wrapper">
+        <div id="map-container">
+            <div id="map"></div>
+        </div>
+
+        <form id="hotspotForm">
+            <input type="hidden" id="lat">
+            <input type="hidden" id="lng">
+            <input type="hidden" id="selectedType">
+            <input type="hidden" id="selectedSeverity">
+            <input type="hidden" id="selectedRecency">
+
+            <label class="question-label">Select Type of Hotspot:</label>
+            <div class="option-grid" id="typeGrid">
+                <div class="choice-box" data-val="pothole">Pothole</div>
+                <div class="choice-box" data-val="underpass">Underpass</div>
+                <div class="choice-box" data-val="construction">Construction</div>
+                <div class="choice-box" data-val="sewage">Sewage</div>
+            </div>
+
+            <label class="question-label">Select Severity:</label>
+            <div class="option-grid" id="severityGrid">
+                <div class="choice-box" data-val="low">Low</div>
+                <div class="choice-box" data-val="medium">Medium</div>
+                <div class="choice-box" data-val="high">High</div>
+                <div class="choice-box" data-val="critical">Critical</div>
+            </div>
+
+            <label class="question-label">How recent is this issue?</label>
+            <div class="option-grid" id="recencyGrid">
+                <div class="choice-box" data-val="very-recent">Very recent</div>
+                <div class="choice-box" data-val="2-weeks">More than 2 weeks</div>
+                <div class="choice-box" data-val="1-month">More than a month</div>
+                <div class="choice-box" data-val="3-months">More than 3 months</div>
+            </div>
+
+            <label class="question-label">Describe the issue:</label>
+            <textarea id="desc" placeholder="Write details here..."></textarea>
+
+            <button type="submit" id="submit-btn">Submit Report</button>
+        </form>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+
+    <script>
+        window.onload = function() {
+            // Map Setup
+            const map = L.map('map').setView([28.6139, 77.2090], 11);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+            let marker;
+
+            // Adding the Search Bar (Geocoder)
+            const geocoder = L.Control.geocoder({
+                defaultMarkGeocode: false,
+                placeholder: "Search for a location...",
+                errorMessage: "Nothing found."
+            })
+            .on('markgeocode', function(e) {
+                const latlng = e.geocode.center;
+                updateMarker(latlng);
+                map.setView(latlng, 16); // Zoom in when location is found
+            })
+            .addTo(map);
+
+            // Universal function to handle marker updates
+            function updateMarker(latlng) {
+                if (marker) map.removeLayer(marker);
+                marker = L.marker(latlng).addTo(map);
+                document.getElementById('lat').value = latlng.lat;
+                document.getElementById('lng').value = latlng.lng;
+            }
+
+            // Manual Map Click
+            map.on('click', function(e) {
+                updateMarker(e.latlng);
+            });
+
+            // Selection Logic for Grids
+            function setupGrid(containerId, hiddenInputId) {
+                const boxes = document.querySelectorAll(`#${containerId} .choice-box`);
+                boxes.forEach(box => {
+                    box.onclick = () => {
+                        boxes.forEach(b => b.classList.remove('active'));
+                        box.classList.add('active');
+                        document.getElementById(hiddenInputId).value = box.getAttribute('data-val');
+                    };
+                });
+            }
+
+            setupGrid('typeGrid', 'selectedType');
+            setupGrid('severityGrid', 'selectedSeverity');
+            setupGrid('recencyGrid', 'selectedRecency');
+
+            // Submit logic
+            document.getElementById('hotspotForm').onsubmit = (e) => {
+                e.preventDefault();
+                const data = {
+                    lat: document.getElementById('lat').value,
+                    lng: document.getElementById('lng').value,
+                    type: document.getElementById('selectedType').value,
+                    severity: document.getElementById('selectedSeverity').value,
+                    recency: document.getElementById('selectedRecency').value,
+                    desc: document.getElementById('desc').value
+                };
+
+                if(!data.lat) return alert("Please select a location on the map!");
+                if(!data.type || !data.severity || !data.recency) return alert("Please fill all options!");
+
+                console.log("Captured Data:", data);
+                alert("Report Collected! Ready for Node.js.");
+            };
+        };
+    </script>
+</body>
+</html>
